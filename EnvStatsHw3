@@ -1,0 +1,144 @@
+import numpy as np
+import matplotlib.pyplot as plt
+import seaborn as sns
+import pandas as pd
+from scipy.stats import kurtosis
+from scipy.stats import skew
+import math
+
+normal_25 = pd.read_csv('/Users/Alex/Downloads/normal25.csv',header=None)
+norm = normal_25.values
+print(norm)
+sns.distplot(normal_25,bins=18,kde=False)
+
+B = 100000
+Boot_25 = np.zeros([B])
+std_25 = np.zeros([B])
+mean_25 = np.zeros([B])
+var_25 = np.zeros([B])
+kurt_25 = np.zeros([B])
+skew_25 = np.zeros([B])
+
+for i in range(B):
+    Int_25 = np.random.randint(0,high=24,size=25)
+    Boot_star = norm[Int_25]
+    std_25[i] = np.std(Boot_star)
+    mean_25[i] = np.mean(Boot_star)
+    var_25[i] = np.var(Boot_star)
+    kurt_25[i] = kurtosis(Boot_star)
+    skew_25[i] = skew(Boot_star)
+    
+    
+x = pd.Series(std_dev,name = 'Standard Dev of N = 25')
+fig = plt.figure()
+sns.distplot(x,bins=25,hist=True,kde=False)
+
+x = pd.Series(mean_25,name = 'Mean of N=25')
+fig = plt.figure()
+sns.distplot(x,bins=25,hist=True,kde=False)
+
+x = pd.Series(var_25,name = 'Variance of N=25')
+fig = plt.figure()
+sns.distplot(x,bins=25,hist=True,kde=False)
+
+x = pd.Series(kurt_25,name = 'Kurtosis of N=25')
+fig = plt.figure()
+sns.distplot(x,bins=25,hist=True,kde=False)
+
+x = pd.Series(skew_25,name = 'Skew of N=25')
+fig = plt.figure()
+sns.distplot(x,bins=25,hist=True,kde=False)
+
+
+import numpy as np
+import matplotlib.pyplot as plt
+import seaborn as sns
+import pandas as pd
+from scipy.stats import kurtosis
+
+normal_100 = pd.read_csv('/Users/Alex/Downloads/normal100.csv',header=None)
+norm = normal_100.values
+# print(norm)
+sns.distplot(norm,bins=18,kde=False)
+
+
+B = 100000
+Boot_25 = np.zeros([B])
+std_25 = np.zeros([B])
+mean_25 = np.zeros([B])
+var_25 = np.zeros([B])
+kurt_25 = np.zeros([B])
+skew_25 = np.zeros([B])
+
+for i in range(B):
+    Int_25 = np.random.randint(0,high=24,size=25)
+    Boot_star = norm[Int_25]
+    std_25[i] = np.std(Boot_star)
+    mean_25[i] = np.mean(Boot_star)
+    var_25[i] = np.var(Boot_star)
+    kurt_25[i] = kurtosis(Boot_star)
+    skew_25[i] = skew(Boot_star)
+
+B = 100000
+Boot_100 = np.zeros([B])
+std_100 = np.zeros([B])
+mean_100 = np.zeros([B])
+var_100 = np.zeros([B])
+kurt_100 = np.zeros([B])
+skew_100 = np.zeros([B])
+
+for i in range(B):
+    Int_100 = np.random.randint(0,high=99,size=100)
+    Boot_star = norm[Int_100]
+    std_100[i] = np.std(Boot_star)
+    mean_100[i] = np.mean(Boot_star)
+    var_100[i] = np.var(Boot_star)
+    kurt_100[i] = kurtosis(Boot_star)
+    skew_100[i] = skew(Boot_star)
+    
+    
+x = pd.Series(std_100,name = 'Standard Deviations')
+sns.distplot(x,bins=50,hist=True,kde=False)
+y = pd.Series(std_25)
+sns.distplot(y,bins=25,hist=True,kde=False)
+fig = plt.figure()
+
+
+y = pd.Series(mean_25)
+a = sns.distplot(y,bins=25,hist=True,kde=False,color="green",label="N=25")
+fig = a.get_figure()
+x = pd.Series(mean_100)
+sns.distplot(x,bins=50,hist=True,kde=False,color="blue",label="N=100")
+plt.legend()
+
+plt.title("Histogram of Mean for Bootstrapped Samples")
+plt.figure()
+
+fig.savefig("hist_mean.png",dpi=500,bbox_inches="tight")
+
+
+#Confidence Interval for the Mean 
+y = pd.Series(mean_25)
+a = sns.distplot(y,bins=25,hist=True,kde=False,color="green",label="N=25")
+fig = a.get_figure()
+
+p = np.percentile(mean_25, 97.5)
+q = np.percentile(mean_25, 2.5)
+textstr = '\n'.join((
+    r'$2.5~~Percentile=%.2f$' % (q, ),
+    r'$97.5~~Percentile=%.2f$' % (p, )))
+
+# these are matplotlib.patch.Patch properties
+props = dict(boxstyle='round', facecolor='gainsboro', alpha=0.5)
+
+# place a text box in upper left in axes coords
+fig.text(0.08, 0.03, textstr, fontsize=10,
+        verticalalignment='top', bbox=props)
+
+
+plt.plot([p,p],[0,14000],linewidth=2,color="g")
+plt.plot([q,q],[0,14000],linewidth=2,color="g",label='95% Confidence Interval')
+plt.legend(bbox_to_anchor=(0.8, -0.18), loc='center',ncol=1)
+plt.title("95% CI of Mean for Bootstrapped Samples, N = 25")
+plt.figure()
+
