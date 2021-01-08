@@ -1,0 +1,227 @@
+import numpy as np
+import pandas as pd
+import matplotlib.pyplot as plt
+import matplotlib as mpl
+import csv
+import seaborn as sns
+from scipy import stats
+import math
+from scipy.optimize import minimize, LinearConstraint
+import matplotlib.ticker as mtick
+
+# Creating list for 3 bins per log10
+spec = 10000 # Number specified as rounded up to nearest log10 integer from max(HaggLQ)
+xxx = np.linspace(1,spec, num=spec) # Array of 1 to 10000, as integers
+xxx = np.log10(xxx) # Finds logs of above values, should be 1 to 4
+xxx2 = np.linspace(0,max(xxx),num=max(xxx)*3+1) # Breaking up into 3 bins per log 10
+xxx3=10**xxx2 # Creating actual bin bound values
+xxx4 = xxx3.tolist()
+xxx4[0] = xxx4[0]-1.01
+
+df = pd.read_csv("gfailruns_allevents_forAlex_v2.3.csv") # Import CSV of Name, TLSE, Building level, Transportation Level, Utilities Level
+df = df.dropna(subset=['Buildings']) # Drop rows where DS is No Value for Buildings (should be same rows for Transportation and Utilities)
+#df = df.drop(['shakemap_version', 'lat', 'lon', 'depth','finitefault','HaggLQ_std','ExpPopLQ',
+ #             'ExpPopLQ_std','ElimLQ','PE_LQ','QE_LQ','Column1'], axis=1) # Drop these columns
+
+#df1=df1.sort_values('TLSE', ascending=True) # sort by values in this column, 
+
+# Minimum bin edge must be slightly less than 0 to account for TLSE=0
+# EDP_cut_bins = np.linspace(-100, 5200, num=54)
+EDP_cut_bins = xxx4
+
+#################################################################################
+# Create bins of TLSE labels and sort events into Bins
+EDP_cut_labels = np.linspace(0,len(EDP_cut_bins)-2,num=len(EDP_cut_bins)-1)
+# Creating column for which bin the TLSE falls into
+df['TLSE_Bin'] = pd.cut(df['HaggLQ'], bins=EDP_cut_bins, labels=EDP_cut_labels)
+
+# Dropping 23 North American Events
+#df = df[df.Dam_Code != 1]
+
+# Damage state needs to be determined if working in dollars. Calculating_Fragility_Values2 
+# has a function for labelled damagelevel(infrastructure)
+
+# Is it necessary to eliminate bins without any events in them?
+# if number does not exist in column TLSE_Bin, then find index for array EDP_cut_labels
+# and delete, also delete same index for array EDP_cut_bins
+
+# Calculating middle value for each bin
+zipped_lists = zip(EDP_cut_bins[0:len(EDP_cut_bins)-1], EDP_cut_bins[1:len(EDP_cut_bins)])
+Bin_Avg = [(x + y)/2 for (x, y) in zipped_lists]
+
+# Making dataframe in which we can view damage level data
+df2 = pd.DataFrame(zip(EDP_cut_bins[0:len(EDP_cut_bins)-1], EDP_cut_bins[1:len(EDP_cut_bins)],
+                            Bin_Avg[0:len(EDP_cut_bins)-1], EDP_cut_labels[0:len(EDP_cut_bins)-1]),
+                            columns=['Bin_Min', 'Bin_Max','Bin_Avg','Bin_Labels']) 
+
+# Counting number of analyses per bin
+def count_(bin_type,bin_lev):
+    subset_df = df[bin_type == bin_lev]
+    return subset_df.TLSE_Bin.count()
+
+y=[]
+# Need to have a +1 because of the way range() counts upwards, it stops 1 short of upper limit
+# For all labels, count the number of analyses in that level
+for i in range(0,len(EDP_cut_labels)):
+    y.append(count_(df.TLSE_Bin,i)) 
+    
+# Appending this column to dataframe or recreate dataframe with it included
+df2['Num_Analyses']=y
+
+df2.drop(df2[df2['Num_Analyses'] == 0].index, inplace=True) # Dropping bins with 0 events
+df2 = df2.reset_index(drop=True) # resetting index to start at 0
+
+d = [df["Buildings"].max(), df["Transportation"].max(), df["Utilities"].min()]
+DS_max = max(d)
+
+# Counts the number of events over a specified damage level for each TLSE bin
+def count_(bin_type, T_bin_lev, Dam_bin_lev):
+    # select only rows where the TLSE bin is equal to bin i
+    subset_df=df[df.TLSE_Bin == T_bin_lev]
+    # select only rows where the buildings/transportation/utilities level is >= level j
+    subset_df=subset_df[bin_type >= Dam_bin_lev]
+    return subset_df.TLSE_Bin.count()
+
+# Appends number exceeding DS to arrays in correct order
+# For the range of all damage states, need +1 because of way range counts upwards
+for j in range(0,int(DS_max)+1):
+    # Creating empty arrays 
+    y1=[]
+    y2=[]
+    y3=[]
+    y4=[]
+    
+    # For each EDP label len(df2)+1
+    for i in range(0,len(df2)): 
+        # count the number of analyses in each column, of length "damage states 0 through max", 
+        y1.append(count_(df.Buildings, df2.iloc[i,3], j))        
+        y2.append(count_(df.Transportation, df2.iloc[i,3], j))
+        y3.append(count_(df.Utilities, df2.iloc[i,3], j))
+    df3 = pd.DataFrame(y1)
+    df2['Buildings_DS_'+str(j)] = df3
+    df2['Buildings_DS_'+str(j)+'_Observed'] = df2['Buildings_DS_'+str(j)]/df2['Num_Analyses']
+    df3 = pd.DataFrame(y2)
+    df2['Transportation_DS_'+str(j)] = df3
+    df2['Transportation_DS_'+str(j)+'_Observed'] = df2['Transportation_DS_'+str(j)]/df2['Num_Analyses']
+    df3 = pd.DataFrame(y3)
+    df2['Utilities_DS_'+str(j)] = df3
+    df2['Utilities_DS_'+str(j)+'_Observed'] = df2['Utilities_DS_'+str(j)]/df2['Num_Analyses']
+    
+df5 = df2.drop(['Buildings_DS_0', 'Buildings_DS_0_Observed', 'Transportation_DS_0', 
+                'Transportation_DS_0_Observed', 'Utilities_DS_0', 
+                'Utilities_DS_0_Observed'], axis=1) # Drop these columns
+                
+
+# Will be using a slightly different method for Transportation, where frag fxns cross
+    # Goal is to maximize products of the products of binomials
+
+def g_2(category,DS):
+      # This is where we need to have definition of loop start    
+    a1 = df2.iloc[:,4] # Num events in each bin
+    a2 = df2[str(category)+'_DS_'+str(DS)] # Num exceedances (Building level 1) in each bin
+    a3 = df2.iloc[:,2] # Avg bin TLSE values
+
+    r_bar = sum(a1*a3)/sum(a1)
+
+    a1 = a1.values.tolist()
+    a2 = a2.values.tolist()
+    a3 = a3.values.tolist()
+
+    a2_2 = df2[str(category)+'_DS_'+str(DS+1)] # Num exceedances (Building level 1) in each bin
+
+    a2_2 = a2_2.values.tolist()
+
+    # Define function to be maximum using Automation
+    def f(params):
+        theta, theta_2, beta = params
+        bounds = ((0,None),(0,None))
+        # CDF finds the probability of exceeding damage state
+        # PMF is the likelihood of achieving the CDF value given the number of events in each bin and exceedances of damage state
+        # Get product of likelihoods
+        # Use -1 to get maximum insted of minimum
+        c = []
+        d = []
+        for i in range(0,len(df2)):
+            c.append(stats.binom.pmf(a2[i], a1[i], stats.norm.cdf(math.log(a3[i]), loc=math.log(theta),scale=beta)))
+            d.append(stats.binom.pmf(a2_2[i], a1[i], stats.norm.cdf(math.log(a3[i]), loc=math.log(theta_2),scale=beta)))  
+        return -1*np.product([c,d])
+
+    # Minimize the defined function using starting theta and beta
+    # Some reason this is coming out with parameters near the input only instead of actual results
+    res = minimize(f,[20,200,100],method='Nelder-Mead')
+
+    if res.success:
+        orig_fitted_params = res.x
+        #print(orig_fitted_params)
+    else:
+        raise ValueError(res.message)
+
+    # df4 represents creating x values of fragility curve itself
+    # Must start at 1 instead of 0 because log(0) does not exist
+    xx = np.linspace(1, max(df['HaggLQ']), num=max(df['HaggLQ']))
+    df4 = pd.DataFrame(xx,columns=['Aggregate Liquefaction Hazard'])
+    aa = df4.iloc[:,0]
+    # possibly convert list to values if nucessary
+
+
+    ######################################################################   
+    # ADJUSTING BETA FOR FEW EVENTS PER BIN
+    fitted_params=np.zeros((3,1))
+    fitted_params[2] = math.sqrt(orig_fitted_params[2]**2+0.25**2)
+    ######################################################################   
+
+    # Adjusting Theta for few events per bin
+    fitted_params[0]=r_bar*((r_bar/orig_fitted_params[0])**(-fitted_params[2]/orig_fitted_params[2]))
+    fitted_params[1]=r_bar*((r_bar/orig_fitted_params[1])**(-fitted_params[2]/orig_fitted_params[2]))
+    
+    print(fitted_params)
+    ###################################################################### 
+
+    # Creating fitted fragility points from fitted parameters for the curve
+    yy=[]
+    yy_2=[]
+    for i in range(0,len(df4)):
+        yy.append(stats.norm.cdf(math.log(aa[i]),loc=math.log(fitted_params[0]),scale=fitted_params[2]))
+    ######################################################################   
+        yy_2.append(stats.norm.cdf(math.log(aa[i]),loc=math.log(fitted_params[1]),scale=fitted_params[2]))
+    df4['Fitted_Values']=yy # Adding column to dataframe
+    df4['Fitted_Values_2']=yy_2
+    # THE ABOVE ALSO CONTAINS RELATIONSHIPS 
+    ######################################################################   
+    
+    # Plotting fragility functions with observed points
+    # This will be worked into the defined function for Building_DS_1, DS_2, etc.
+    mpl.style.use('default')
+    fig, ax = plt.subplots(figsize=(6, 4.5))
+    csfont = {'fontname':'Times New Roman'}
+    ax.set_xscale('log')
+        # STARTING COLUMN FOR EXCEEDING
+    start_col = 1
+    ax.plot('Aggregate Liquefaction Hazard', 'Fitted_Values', 'k-', label=str(category)+' '+str(DS)+' Fitted',data=df4) # DS_1 fitted
+    ax.plot('Bin_Avg', str(category)+'_DS_'+str(DS)+'_Observed','k+', markersize=16,
+            label=str(category)+' '+str(DS)+' Observed',data=df5) # DS_1 observed
+
+    ax.plot('Aggregate Liquefaction Hazard', 'Fitted_Values_2', 'k--', label=str(category)+' '+str(DS+1)+' Fitted',data=df4) # DS_1 fitted
+    ax.plot('Bin_Avg', str(category)+'_DS_'+str(DS+1)+'_Observed','ko', mfc='none', markersize=10,
+            label=str(category)+' '+str(DS+1)+' Observed',data=df5) # DS_1 observed
+
+
+    # copy and paste above with different linestyle for additional damage states
+    # Laurie does not want titles for paper figures
+    # plt.title(str(category)+', DS '+str(DS))
+    plt.xlabel('Aggregate Liquefaction Hazard Bin Average', fontsize=10,**csfont)
+    plt.ylabel('Probability of Exceeding Damage State Thresholds', fontsize=10,**csfont)
+    plt.legend(loc='upper left', fontsize='8')
+    
+    fmt = '{x:,.0f}'
+    tick = mtick.StrMethodFormatter(fmt)
+    ax.xaxis.set_major_formatter(tick)
+    plt.xticks([1,10,100,1000],**csfont)
+        # For ticks, need max to be one unit higher than the value I actually want
+    plt.ylim(-0.05, 1.05)
+    plt.yticks(np.arange(0, 1.2, 0.2),**csfont)
+    plt.grid(linestyle='-', linewidth='0.5')
+    plt.savefig('FragFxns_'+str(category)+'_NA_FL_WB_4.png',format="PNG",dpi=500,bbox_inches="tight")
+    
+    
+    g_2('Transportation',1)
